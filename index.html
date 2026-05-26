@@ -4,7 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Streaming AI Chatbot</title>
+    <title>Streaming AI Chatbot with Markdown</title>
+    <!-- Marked.js for Markdown parsing -->
+    <script src="md_parser/marked.min.js"></script>
+    <!-- DOMPurify for XSS protection -->
+    <script src="md_parser/purify.min.js"></script>
+
     <style>
         * {
             margin: 0;
@@ -13,7 +18,7 @@
         }
 
         body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
             background: #0d1117;
             color: #c9d1d9;
             min-height: 100vh;
@@ -24,10 +29,10 @@
 
         .chat-container {
             width: 100%;
-            max-width: 800px;
+            max-width: 850px;
             display: flex;
             flex-direction: column;
-            height: 90vh;
+            height: 80vh;
         }
 
         h1 {
@@ -48,7 +53,7 @@
         }
 
         .message {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
             animation: fadeIn 0.3s ease;
         }
 
@@ -58,11 +63,12 @@
 
         .message-bubble {
             display: inline-block;
-            max-width: 80%;
-            padding: 12px 16px;
+            max-width: 85%;
+            padding: 14px 18px;
             border-radius: 12px;
             line-height: 1.6;
             word-wrap: break-word;
+            text-align: left;
         }
 
         .message.user .message-bubble {
@@ -76,9 +82,135 @@
             color: #c9d1d9;
             border: 1px solid #30363d;
             border-bottom-left-radius: 4px;
+        }
+
+        /* Markdown Styles */
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3,
+        .markdown-body h4,
+        .markdown-body h5,
+        .markdown-body h6 {
+            margin: 16px 0 8px 0;
+            font-weight: 600;
+            line-height: 1.25;
+            color: #e6edf3;
+        }
+
+        .markdown-body h1 {
+            font-size: 1.5em;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 4px;
+        }
+
+        .markdown-body h2 {
+            font-size: 1.3em;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 4px;
+        }
+
+        .markdown-body h3 {
+            font-size: 1.15em;
+        }
+
+        .markdown-body p {
+            margin: 8px 0;
+        }
+
+        .markdown-body strong,
+        .markdown-body b {
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .markdown-body em,
+        .markdown-body i {
+            color: #a5d6ff;
+        }
+
+        .markdown-body code {
+            background: rgba(110, 118, 129, 0.4);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.9em;
+            color: #ff7b72;
+        }
+
+        .markdown-body pre {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+
+        .markdown-body pre code {
+            background: transparent;
+            padding: 0;
+            color: #e6edf3;
+            font-size: 0.85em;
+            line-height: 1.5;
+        }
+
+        .markdown-body blockquote {
+            border-left: 3px solid #58a6ff;
+            margin: 12px 0;
+            padding: 4px 16px;
+            color: #8b949e;
+            background: rgba(88, 166, 255, 0.05);
+            border-radius: 0 4px 4px 0;
+        }
+
+        .markdown-body ul,
+        .markdown-body ol {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+
+        .markdown-body li {
+            margin: 4px 0;
+        }
+
+        .markdown-body a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+
+        .markdown-body a:hover {
+            text-decoration: underline;
+        }
+
+        .markdown-body hr {
+            border: none;
+            border-top: 1px solid #30363d;
+            margin: 16px 0;
+        }
+
+        .markdown-body table {
+            border-collapse: collapse;
+            margin: 12px 0;
+            width: 100%;
+        }
+
+        .markdown-body th,
+        .markdown-body td {
+            border: 1px solid #30363d;
+            padding: 8px 12px;
             text-align: left;
         }
 
+        .markdown-body th {
+            background: #21262d;
+            font-weight: 600;
+        }
+
+        .markdown-body tr:nth-child(even) {
+            background: rgba(33, 38, 45, 0.5);
+        }
+
+        /* Streaming cursor */
         .streaming-cursor {
             display: inline-block;
             width: 8px;
@@ -167,17 +299,47 @@
             border-radius: 8px;
             display: none;
         }
+
+        /* Code block copy button */
+        .code-block-wrapper {
+            position: relative;
+        }
+
+        .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 4px 10px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            color: #8b949e;
+            font-size: 12px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .code-block-wrapper:hover .copy-btn {
+            opacity: 1;
+        }
+
+        .copy-btn:hover {
+            background: #30363d;
+            color: #c9d1d9;
+        }
     </style>
 </head>
 
 <body>
     <div class="chat-container">
-        <h1>🤖 Streaming AI Chatbot</h1>
+        <h1>🤖 Streaming AI with Markdown</h1>
 
         <div class="chat-messages" id="chatMessages"></div>
 
         <div class="input-area">
-            <input type="text" id="queryInput" placeholder="Ask anything..." autocomplete="off">
+            <input type="text" id="queryInput" placeholder="Ask anything... supports **bold**, `code`, etc."
+                autocomplete="off">
             <button id="sendBtn" onclick="sendQuery()">Send</button>
         </div>
 
@@ -192,7 +354,16 @@
 
         let eventSource = null;
         let currentAssistantBubble = null;
-        let currentCursor = null;
+        let rawTextBuffer = '';      // Accumulates raw Markdown text
+        let lastRenderedHtml = '';   // To avoid unnecessary re-renders
+
+        // Configure Marked for safe rendering
+        marked.use({
+            gfm: true,
+            breaks: true,
+            headerIds: false,
+            mangle: false
+        });
 
         queryInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendQuery();
@@ -204,7 +375,15 @@
 
             const bubble = document.createElement('div');
             bubble.className = 'message-bubble';
-            bubble.textContent = text;
+
+            if (isUser) {
+                // User messages: plain text (or light markdown)
+                bubble.textContent = text;
+            } else {
+                // Assistant messages: markdown container
+                bubble.className += ' markdown-body';
+                bubble.innerHTML = renderMarkdown(text);
+            }
 
             msgDiv.appendChild(bubble);
             chatMessages.appendChild(msgDiv);
@@ -213,23 +392,92 @@
             return bubble;
         }
 
+        function renderMarkdown(text) {
+            // Parse markdown, then sanitize HTML to prevent XSS
+            const rawHtml = marked.parse(text);
+            return DOMPurify.sanitize(rawHtml, {
+                ALLOWED_TAGS: [
+                    'p', 'br', 'strong', 'b', 'em', 'i', 'code', 'pre', 'blockquote',
+                    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                    'ul', 'ol', 'li', 'a', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+                    'div', 'span'
+                ],
+                ALLOWED_ATTR: ['href', 'class', 'target']
+            });
+        }
+
         function createStreamingMessage() {
             const msgDiv = document.createElement('div');
             msgDiv.className = 'message assistant';
 
             const bubble = document.createElement('div');
-            bubble.className = 'message-bubble';
-            bubble.innerHTML = ''; // Start empty
+            bubble.className = 'message-bubble markdown-body';
 
+            // Container for rendered markdown
+            const contentDiv = document.createElement('div');
+            contentDiv.id = 'stream-content';
+
+            // Streaming cursor
             const cursor = document.createElement('span');
             cursor.className = 'streaming-cursor';
+            cursor.id = 'stream-cursor';
 
+            bubble.appendChild(contentDiv);
             bubble.appendChild(cursor);
             msgDiv.appendChild(bubble);
             chatMessages.appendChild(msgDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
-            return { bubble, cursor };
+            return { bubble, contentDiv, cursor };
+        }
+
+        function updateStreamingMarkdown(text) {
+            if (!currentAssistantBubble) return;
+
+            const contentDiv = currentAssistantBubble.querySelector('#stream-content');
+            const cursor = currentAssistantBubble.querySelector('#stream-cursor');
+
+            // Render the accumulated text as markdown
+            const html = renderMarkdown(text);
+
+            // Only update DOM if changed (prevents flicker)
+            if (html !== lastRenderedHtml) {
+                contentDiv.innerHTML = html;
+                lastRenderedHtml = html;
+
+                // Re-append cursor after content
+                if (cursor && cursor.parentNode) {
+                    cursor.parentNode.appendChild(cursor);
+                }
+
+                // Add copy buttons to code blocks
+                addCopyButtons(contentDiv);
+            }
+
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addCopyButtons(container) {
+            const pres = container.querySelectorAll('pre');
+            pres.forEach(pre => {
+                if (pre.parentElement.classList.contains('code-block-wrapper')) return;
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'code-block-wrapper';
+                pre.parentNode.insertBefore(wrapper, pre);
+                wrapper.appendChild(pre);
+
+                const btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.textContent = 'Copy';
+                btn.onclick = () => {
+                    const code = pre.querySelector('code') || pre;
+                    navigator.clipboard.writeText(code.textContent);
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => btn.textContent = 'Copy', 2000);
+                };
+                wrapper.appendChild(btn);
+            });
         }
 
         function showError(text) {
@@ -248,38 +496,44 @@
             sendBtn.onclick = sendQuery;
             queryInput.disabled = false;
 
-            // Remove cursor
-            if (currentCursor && currentCursor.parentNode) {
-                currentCursor.remove();
+            // Remove cursor, finalize content
+            const cursor = document.getElementById('stream-cursor');
+            if (cursor) cursor.remove();
+
+            // Final render to ensure everything is clean
+            if (rawTextBuffer) {
+                updateStreamingMarkdown(rawTextBuffer);
             }
+
+            rawTextBuffer = '';
+            lastRenderedHtml = '';
+            currentAssistantBubble = null;
         }
 
         async function sendQuery() {
             const query = queryInput.value.trim();
             if (!query) return;
 
-            // Stop if already streaming
             if (eventSource) {
                 stopStreaming();
                 return;
             }
 
-            // Add user message
+            // Add user message (plain text)
             addMessage(query, true);
             queryInput.value = '';
 
-            // Create assistant message with streaming cursor
-            const { bubble, cursor } = createStreamingMessage();
+            // Create streaming assistant message
+            const { bubble, contentDiv, cursor } = createStreamingMessage();
             currentAssistantBubble = bubble;
-            currentCursor = cursor;
+            rawTextBuffer = '';
+            lastRenderedHtml = '';
 
-            // Update button to "Stop"
             sendBtn.textContent = 'Stop';
             sendBtn.classList.add('stop-btn');
             sendBtn.onclick = stopStreaming;
             queryInput.disabled = true;
 
-            // Use fetch with ReadableStream for POST + SSE
             try {
                 const response = await fetch('api.php', {
                     method: 'POST',
@@ -297,9 +551,8 @@
 
                     buffer += decoder.decode(value, { stream: true });
 
-                    // Process SSE events
                     const events = buffer.split('\n\n');
-                    buffer = events.pop(); // Keep incomplete event
+                    buffer = events.pop();
 
                     for (const event of events) {
                         if (!event.trim()) continue;
@@ -337,11 +590,11 @@
                                 return;
                             }
 
-                            // Append token text
                             if (chunk.token) {
-                                const textNode = document.createTextNode(chunk.token);
-                                bubble.insertBefore(textNode, cursor);
-                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                                // Accumulate raw markdown text
+                                rawTextBuffer += chunk.token;
+                                // Re-render entire buffer as markdown
+                                updateStreamingMarkdown(rawTextBuffer);
                             }
 
                             if (chunk.done) {
