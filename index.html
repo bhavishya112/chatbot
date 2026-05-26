@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streaming AI Chatbot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            height: 90vh;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #58a6ff;
+            font-size: 24px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #161b22;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            border: 1px solid #30363d;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .message.user {
+            text-align: right;
+        }
+
+        .message-bubble {
+            display: inline-block;
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: #1f6feb;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-bubble {
+            background: #21262d;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-bottom-left-radius: 4px;
+            text-align: left;
+        }
+
+        .streaming-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 18px;
+            background: #58a6ff;
+            margin-left: 4px;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+        }
+
+        @keyframes blink {
+
+            0%,
+            50% {
+                opacity: 1;
+            }
+
+            51%,
+            100% {
+                opacity: 0;
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+
+        #queryInput {
+            flex: 1;
+            padding: 14px 18px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            color: #c9d1d9;
+            font-size: 16px;
+            outline: none;
+        }
+
+        #queryInput:focus {
+            border-color: #58a6ff;
+        }
+
+        #sendBtn {
+            padding: 14px 28px;
+            background: #238636;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        #sendBtn:hover:not(:disabled) {
+            background: #2ea043;
+        }
+
+        #sendBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .stop-btn {
+            background: #da3633 !important;
+        }
+
+        .error-msg {
+            color: #f85149;
+            padding: 10px;
+            margin-top: 10px;
+            background: rgba(248, 81, 73, 0.1);
+            border-radius: 8px;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="chat-container">
+        <h1>🤖 Streaming AI Chatbot</h1>
+
+        <div class="chat-messages" id="chatMessages"></div>
+
+        <div class="input-area">
+            <input type="text" id="queryInput" placeholder="Ask anything..." autocomplete="off">
+            <button id="sendBtn" onclick="sendQuery()">Send</button>
+        </div>
+
+        <div class="error-msg" id="errorMsg"></div>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chatMessages');
+        const queryInput = document.getElementById('queryInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const errorMsg = document.getElementById('errorMsg');
+
+        let eventSource = null;
+        let currentAssistantBubble = null;
+        let currentCursor = null;
+
+        queryInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendQuery();
+        });
+
+        function addMessage(text, isUser) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.textContent = text;
+
+            msgDiv.appendChild(bubble);
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            return bubble;
+        }
+
+        function createStreamingMessage() {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message assistant';
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.innerHTML = ''; // Start empty
+
+            const cursor = document.createElement('span');
+            cursor.className = 'streaming-cursor';
+
+            bubble.appendChild(cursor);
+            msgDiv.appendChild(bubble);
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            return { bubble, cursor };
+        }
+
+        function showError(text) {
+            errorMsg.textContent = text;
+            errorMsg.style.display = 'block';
+            setTimeout(() => errorMsg.style.display = 'none', 5000);
+        }
+
+        function stopStreaming() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            sendBtn.textContent = 'Send';
+            sendBtn.classList.remove('stop-btn');
+            sendBtn.onclick = sendQuery;
+            queryInput.disabled = false;
+
+            // Remove cursor
+            if (currentCursor && currentCursor.parentNode) {
+                currentCursor.remove();
+            }
+        }
+
+        async function sendQuery() {
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            // Stop if already streaming
+            if (eventSource) {
+                stopStreaming();
+                return;
+            }
+
+            // Add user message
+            addMessage(query, true);
+            queryInput.value = '';
+
+            // Create assistant message with streaming cursor
+            const { bubble, cursor } = createStreamingMessage();
+            currentAssistantBubble = bubble;
+            currentCursor = cursor;
+
+            // Update button to "Stop"
+            sendBtn.textContent = 'Stop';
+            sendBtn.classList.add('stop-btn');
+            sendBtn.onclick = stopStreaming;
+            queryInput.disabled = true;
+
+            // Use fetch with ReadableStream for POST + SSE
+            try {
+                const response = await fetch('api.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process SSE events
+                    const events = buffer.split('\n\n');
+                    buffer = events.pop(); // Keep incomplete event
+
+                    for (const event of events) {
+                        if (!event.trim()) continue;
+
+                        const lines = event.split('\n');
+                        let eventName = 'message';
+                        let data = '';
+
+                        for (const line of lines) {
+                            if (line.startsWith('event:')) {
+                                eventName = line.slice(6).trim();
+                            } else if (line.startsWith('data:')) {
+                                data = line.slice(5).trim();
+                            }
+                        }
+
+                        if (eventName === 'error') {
+                            const err = JSON.parse(data);
+                            showError(err.error);
+                            stopStreaming();
+                            return;
+                        }
+
+                        if (eventName === 'done') {
+                            stopStreaming();
+                            return;
+                        }
+
+                        if (eventName === 'message' && data) {
+                            const chunk = JSON.parse(data);
+
+                            if (chunk.error) {
+                                showError(chunk.error);
+                                stopStreaming();
+                                return;
+                            }
+
+                            // Append token text
+                            if (chunk.token) {
+                                const textNode = document.createTextNode(chunk.token);
+                                bubble.insertBefore(textNode, cursor);
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            }
+
+                            if (chunk.done) {
+                                stopStreaming();
+                            }
+                        }
+                    }
+                }
+
+            } catch (err) {
+                showError('Connection error: ' + err.message);
+                stopStreaming();
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,30 @@
+1779774701  : 
+2026-05-26 05:55:59  : 
+2026-05-26 05:57:33  : 
+2026-05-26 05:57:51  : 
+2026-05-26 10:02:48  : 
+2026-05-26 10:03:24  : 
+2026-05-26 10:04:551:1
+2026-05-26 10:06:58 :
+2026-05-26 10:11:02 false:false
+2026-05-26 10:19:04 2026-05-26 10:21:28 12026-05-26 10:23:10 
+2026-05-26 10:24:30 
+2026-05-26 10:26:58 Resource id #10
+2026-05-26 10:27:05 Resource id #10
+2026-05-26 10:33:15 Array
+(
+    [0] => Resource id #7
+    [1] => Resource id #8
+    [2] => Resource id #9
+)
+
+2026-05-26 10:35:37 stream
+2026-05-26 10:35:57 stream
+2026-05-26 10:36:20 stream
+2026-05-26 10:40:56 stream
+2026-05-26 10:41:53  : 
+2026-05-26 10:58:10string : string
+2026-05-26 11:10:24 output: string | errors: string
+2026-05-26 11:10:24 CMD: conda run --no-capture-output -n env python "D:\cs\projects\chatbot/ai_backend.py" "edge"
+2026-05-26 11:12:27 output: string | errors: string
+2026-05-26 11:12:27 CMD: conda run --no-capture-output -n env python "D:\cs\projects\chatbot/ai_backend.py" "hey brother"
