@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Streaming AI Chatbot with Markdown</title>
+    <title>Chatbot</title>
     <!-- Marked.js for Markdown parsing -->
     <script src="md_parser/marked.min.js"></script>
     <!-- DOMPurify for XSS protection -->
@@ -32,7 +32,7 @@
             max-width: 850px;
             display: flex;
             flex-direction: column;
-            height: 80vh;
+            height: 90vh;
         }
 
         h1 {
@@ -333,13 +333,12 @@
 
 <body>
     <div class="chat-container">
-        <h1>🤖 Streaming AI with Markdown</h1>
+        <h1>⚡ Chatbot </h1>
 
         <div class="chat-messages" id="chatMessages"></div>
 
         <div class="input-area">
-            <input type="text" id="queryInput" placeholder="Ask anything... supports **bold**, `code`, etc."
-                autocomplete="off">
+            <input type="text" id="queryInput" placeholder="Ask anything..." autocomplete="off">
             <button id="sendBtn" onclick="sendQuery()">Send</button>
         </div>
 
@@ -368,6 +367,7 @@
         queryInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendQuery();
         });
+        // console.log("isUserScrolling : " + isUserScrolling(chatMessages));
 
         function addMessage(text, isUser) {
             const msgDiv = document.createElement('div');
@@ -387,6 +387,7 @@
 
             msgDiv.appendChild(bubble);
             chatMessages.appendChild(msgDiv);
+
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
             return bubble;
@@ -426,6 +427,7 @@
             bubble.appendChild(cursor);
             msgDiv.appendChild(bubble);
             chatMessages.appendChild(msgDiv);
+
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
             return { bubble, contentDiv, cursor };

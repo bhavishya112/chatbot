@@ -11,6 +11,7 @@ import sys
 import warnings
 from transformers import pipeline, TextIteratorStreamer
 from threading import Thread
+from huggingface_hub import login 
 
 HOST = '127.0.0.1'
 PORT = 9999
@@ -18,6 +19,7 @@ PORT = 9999
 pipe = None
 
 def load_model():
+    login("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")
     global pipe
     warnings.filterwarnings('ignore')
     print("[SERVER] Loading model...", flush=True)
@@ -26,7 +28,9 @@ def load_model():
         "text-generation",
         model="meta-llama/Llama-3.2-1B-Instruct",
         torch_dtype="auto",
-        device_map="auto"
+        device_map="auto",
+        # device = "cuda"
+
     )
     print("[SERVER] Ready on port 9999", flush=True)
 
