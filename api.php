@@ -1,9 +1,17 @@
 <?php
 /**
- * SSE Streaming API - Forwards Python chunks to browser in real-time
+ * SSE Streaming API - Streams directly from Google Gemini API
+ * 
+ * Setup: Get a free API key from https://aistudio.google.com/app/apikey
+ *        Set it below or via environment variable: GEMINI_API_KEY
  */
 
-// CRITICAL: Disable all output buffering
+// ─── CONFIG ─────────────────────────────────────────────────────────
+$GEMINI_API_KEY = getenv('GEMINI_API_KEY') ?: 'AQ.Ab8RN6KK16GDAdckP_qJqjRmr2o86FsqvG9nmDCrE_l6Ub-oSw';
+$GEMINI_MODEL   = getenv('GEMINI_MODEL')   ?: 'gemini-2.5-flash';
+$GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+// ─── DISABLE ALL BUFFERING ──────────────────────────────────────────
 ob_implicit_flush(true);
 ob_end_flush();
 if (ob_get_level()) {
@@ -20,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// Read POST body (SSE usually sends data via POST)
+// ─── READ CLIENT REQUEST ────────────────────────────────────────────
 $json = file_get_contents('php://input');
 $data = json_decode($json, true);
 
@@ -29,72 +37,126 @@ if (empty($data['query'])) {
     exit;
 }
 
-$host = '127.0.0.1';
-$port = 9999;
-$timeout = 120;
+// ─── BUILD GEMINI REQUEST ───────────────────────────────────────────
+$geminiUrl = sprintf(
+    '%s/%s:streamGenerateContent?alt=sse&key=%s',
+    $GEMINI_BASE_URL,
+    $GEMINI_MODEL,
+    urlencode($GEMINI_API_KEY)
+);
 
-$socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-if (!$socket) {
-    echo "event: error\ndata: " . json_encode(['error' => 'Socket failed']) . "\n\n";
-    exit;
-}
+$geminiPayload = json_encode([
+    'contents' => [
+        [
+            'role'  => 'user',
+            'parts' => [
+                ['text' => $data['query']]
+            ]
+        ]
+    ],
+    'generationConfig' => [
+        'maxOutputTokens' => 1024,
+        'temperature'     => 0.7,
+        'topP'            => 0.9,
+    ],
+    'safetySettings' => [
+        ['category' => 'HARM_CATEGORY_HARASSMENT',       'threshold' => 'BLOCK_MEDIUM_AND_ABOVE'],
+        ['category' => 'HARM_CATEGORY_HATE_SPEECH',      'threshold' => 'BLOCK_MEDIUM_AND_ABOVE'],
+        ['category' => 'HARM_CATEGORY_SEXUALLY_EXPLICIT','threshold' => 'BLOCK_MEDIUM_AND_ABOVE'],
+        ['category' => 'HARM_CATEGORY_DANGEROUS_CONTENT','threshold' => 'BLOCK_MEDIUM_AND_ABOVE'],
+    ]
+]);
 
-socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $timeout, 'usec' => 0]);
-socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, ['sec' => 5, 'usec' => 0]);
+// ─── STREAM FROM GEMINI TO CLIENT ───────────────────────────────────
+$ch = curl_init($geminiUrl);
 
-// Disable Nagle algorithm for low latency
-socket_set_option($socket, SOL_TCP, TCP_NODELAY, 1);
-
-if (!socket_connect($socket, $host, $port)) {
-    echo "event: error\ndata: " . json_encode(['error' => 'Cannot connect to AI server']) . "\n\n";
-    socket_close($socket);
-    exit;
-}
-
-// Send query to Python
-$payload = json_encode(['query' => $data['query']]) . "\n";
-socket_write($socket, $payload, strlen($payload));
-
-// Stream Python's chunks directly to browser
-$buffer = '';
-while (true) {
-    $chunk = socket_read($socket, 4096);
-    if ($chunk === false || $chunk === '') {
-        break;
-    }
-    
-    $buffer .= $chunk;
-    
-    // Process complete lines (newline-delimited JSON)
-    while (($pos = strpos($buffer, "\n")) !== false) {
-        $line = substr($buffer, 0, $pos);
-        $buffer = substr($buffer, $pos + 1);
+curl_setopt_array($ch, [
+    CURLOPT_POST           => true,
+    CURLOPT_POSTFIELDS     => $geminiPayload,
+    CURLOPT_HTTPHEADER     => [
+        'Content-Type: application/json',
+        'Accept: text/event-stream'
+    ],
+    CURLOPT_RETURNTRANSFER => false,  // We want to stream directly
+    CURLOPT_WRITEFUNCTION  => function ($ch, $chunk) {
+        // Gemini returns SSE format: data: {...}\n\n
+        // We parse each SSE line and re-emit in our own SSE format
+        // so the frontend contract stays identical to the old Python backend
         
-        if (empty($line)) continue;
+        static $buffer = '';
+        $buffer .= $chunk;
         
-        $token_data = json_decode($line, true);
-        if (!$token_data) continue;
-        
-        // Send SSE event
-        echo "event: message\n";
-        echo "data: " . json_encode($token_data) . "\n\n";
-        
-        // Flush to browser immediately
-        if (ob_get_level()) {
-            ob_flush();
+        while (($pos = strpos($buffer, "\n")) !== false) {
+            $line = substr($buffer, 0, $pos);
+            $buffer = substr($buffer, $pos + 1);
+            
+            $line = trim($line);
+            if (empty($line) || !str_starts_with($line, 'data: ')) {
+                continue;
+            }
+            
+            $jsonStr = substr($line, 6); // Remove "data: " prefix
+            
+            // Gemini sends "[DONE]" as final marker in some proxies
+            if ($jsonStr === '[DONE]') {
+                echo "event: done\ndata: " . json_encode(['finished' => true]) . "\n\n";
+                flush();
+                continue;
+            }
+            
+            $geminiChunk = json_decode($jsonStr, true);
+            if (!$geminiChunk || empty($geminiChunk['candidates'])) {
+                continue;
+            }
+            
+            // Extract token text from Gemini's nested structure
+            $candidate = $geminiChunk['candidates'][0] ?? null;
+            $parts     = $candidate['content']['parts'] ?? [];
+            $tokenText = '';
+            
+            foreach ($parts as $part) {
+                $tokenText .= $part['text'] ?? '';
+            }
+            
+            $isDone = !empty($candidate['finishReason']);
+            
+            // Re-emit in the SAME format as the old Python backend
+            // { token: "...", done: false }
+            echo "event: message\n";
+            echo "data: " . json_encode([
+                'token' => $tokenText,
+                'done'  => $isDone
+            ]) . "\n\n";
+            
+            if (ob_get_level()) ob_flush();
+            flush();
+            
+            if ($isDone) {
+                // Send final done event too
+                echo "event: done\ndata: " . json_encode(['finished' => true]) . "\n\n";
+                flush();
+            }
         }
-        flush();
         
-        // Check if done
-        if (!empty($token_data['done'])) {
-            break 2;
-        }
-    }
+        return strlen($chunk); // Required by cURL
+    },
+    CURLOPT_TIMEOUT        => 120,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_SSL_VERIFYPEER => true,
+]);
+
+// Execute — this blocks and streams via the write callback
+$result = curl_exec($ch);
+
+if ($result === false) {
+    $error = curl_error($ch);
+    echo "event: error\ndata: " . json_encode(['error' => 'Gemini API error: ' . $error]) . "\n\n";
+    flush();
 }
 
-socket_close($socket);
+unset($ch);
 
-// Send final done event
+// Final safety flush
 echo "event: done\ndata: " . json_encode(['finished' => true]) . "\n\n";
 flush();
 ?>
