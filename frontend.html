@@ -355,6 +355,8 @@
         let currentAssistantBubble = null;
         let rawTextBuffer = '';      // Accumulates raw Markdown text
         let lastRenderedHtml = '';   // To avoid unnecessary re-renders
+        const sessionId = getOrCreateSessionId();
+        const consoleErrors = [];
 
         // Configure Marked for safe rendering
         marked.use({
@@ -367,7 +369,83 @@
         queryInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendQuery();
         });
+
+        window.addEventListener('error', (event) => {
+            rememberConsoleError(`${event.message} at ${event.filename}:${event.lineno}:${event.colno}`);
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            rememberConsoleError(`Unhandled promise rejection: ${event.reason}`);
+        });
+
+        const originalConsoleError = console.error.bind(console);
+        console.error = (...args) => {
+            rememberConsoleError(args.map(String).join(' '));
+            originalConsoleError(...args);
+        };
         // console.log("isUserScrolling : " + isUserScrolling(chatMessages));
+
+        function getOrCreateSessionId() {
+            const key = 'chatbot_session_id';
+            let existing = localStorage.getItem(key);
+            if (!existing) {
+                existing = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+                localStorage.setItem(key, existing);
+            }
+            return existing;
+        }
+
+        function rememberConsoleError(text) {
+            if (!text) return;
+            consoleErrors.push(String(text).slice(0, 2000));
+            while (consoleErrors.length > 20) consoleErrors.shift();
+        }
+
+        function captureVisibleHtml() {
+            const blockedTags = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT']);
+
+            function isVisibleElement(element) {
+                if (blockedTags.has(element.tagName)) return false;
+                const style = window.getComputedStyle(element);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+                    return false;
+                }
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0 &&
+                    rect.height > 0 &&
+                    rect.bottom >= 0 &&
+                    rect.right >= 0 &&
+                    rect.top <= window.innerHeight &&
+                    rect.left <= window.innerWidth;
+            }
+
+            function cloneVisible(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const text = node.textContent.trim();
+                    return text ? document.createTextNode(text) : null;
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE || !isVisibleElement(node)) {
+                    return null;
+                }
+                const clone = node.cloneNode(false);
+                node.childNodes.forEach(child => {
+                    const visibleChild = cloneVisible(child);
+                    if (visibleChild) clone.appendChild(visibleChild);
+                });
+                return clone;
+            }
+
+            const visibleBody = cloneVisible(document.body);
+            const html = visibleBody ? visibleBody.innerHTML : '';
+            return DOMPurify.sanitize(html, {
+                ALLOWED_TAGS: [
+                    'main', 'section', 'article', 'div', 'span', 'p', 'button', 'input', 'textarea',
+                    'select', 'option', 'label', 'form', 'ul', 'ol', 'li', 'a', 'pre', 'code',
+                    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td'
+                ],
+                ALLOWED_ATTR: ['id', 'class', 'type', 'name', 'role', 'aria-label', 'placeholder', 'disabled']
+            }).slice(0, 120000);
+        }
 
         function addMessage(text, isUser) {
             const msgDiv = document.createElement('div');
@@ -512,8 +590,8 @@
             currentAssistantBubble = null;
         }
 
-        async function sendQuery() {
-            const query = queryInput.value.trim();
+        async function sendQuery(queryOverride = null, includeUiContext = false, reuseBubble = false) {
+            const query = queryOverride === null ? queryInput.value.trim() : queryOverride;
             if (!query) return;
 
             if (eventSource) {
@@ -521,15 +599,19 @@
                 return;
             }
 
-            // Add user message (plain text)
-            addMessage(query, true);
-            queryInput.value = '';
+            if (!reuseBubble) {
+                // Add user message (plain text)
+                addMessage(query, true);
+                queryInput.value = '';
+            }
 
-            // Create streaming assistant message
-            const { bubble, contentDiv, cursor } = createStreamingMessage();
-            currentAssistantBubble = bubble;
-            rawTextBuffer = '';
-            lastRenderedHtml = '';
+            if (!reuseBubble) {
+                // Create streaming assistant message
+                const { bubble, contentDiv, cursor } = createStreamingMessage();
+                currentAssistantBubble = bubble;
+                rawTextBuffer = '';
+                lastRenderedHtml = '';
+            }
 
             sendBtn.textContent = 'Stop';
             sendBtn.classList.add('stop-btn');
@@ -537,10 +619,17 @@
             queryInput.disabled = true;
 
             try {
-                const response = await fetch('api.php', {
+                const payload = {
+                    query: query,
+                    session_id: sessionId,
+                    visible_html: includeUiContext ? captureVisibleHtml() : '',
+                    console_errors: includeUiContext ? consoleErrors.slice(-20) : []
+                };
+
+                const response = await fetch('backend.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: query })
+                    body: JSON.stringify(payload)
                 });
 
                 const reader = response.body.getReader();
@@ -580,6 +669,16 @@
 
                         if (eventName === 'done') {
                             stopStreaming();
+                            return;
+                        }
+
+                        if (eventName === 'ui_context_request') {
+                            eventSource = null;
+                            rawTextBuffer = '';
+                            lastRenderedHtml = '';
+                            const contentDiv = currentAssistantBubble.querySelector('#stream-content');
+                            if (contentDiv) contentDiv.textContent = '';
+                            await sendQuery(query, true, true);
                             return;
                         }
 

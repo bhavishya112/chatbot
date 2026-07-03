@@ -1,0 +1,140 @@
+# --- Python basics ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+*.manifest
+*.spec
+
+# --- Virtual environments ---
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Build & packaging ---
+build/
+dist/
+*.wheel
+*.whl
+*.lock
+pip-wheel-metadata/
+*.log
+
+# --- Jupyter & notebooks ---
+.ipynb_checkpoints/
+*.ipynb.json
+*.ipynb.py
+
+# --- Agentic / chatbot systems ---
+# Conversation logs, transcripts, and temp files
+logs/
+*.log
+chat_history/
+sessions/
+conversations/
+data/memory/
+
+# --- ML/AI artifacts ---
+# Model weights, checkpoints, and embeddings
+*.ckpt
+*.pth
+*.pt
+*.h5
+*.tflite
+*.onnx
+checkpoints/
+saved_models/
+models/
+embeddings/
+vector_store/
+*.db
+
+# --- Cache & temp ---
+.cache/
+*.tmp
+*.temp
+tmp/
+temp/
+*.swp
+*.swo
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- IDE/editor ---
+.vscode/
+.idea/
+*.iml
+*.sublime-workspace
+*.sublime-project
+
+# --- Testing ---
+.coverage
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+
+# --- Security ---
+# Don’t commit secrets or API keys
+*.pem
+*.key
+*.crt
+*.env
+secrets.json
+
+# --- Web frameworks ---
+# Django
+*.log
+*.pot
+*.pyc
+__pycache__/
+db.sqlite3
+media/
+staticfiles/
+
+# Flask / FastAPI
+instance/
+*.db
+*.sqlite
+
+# --- Frontend builds ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.pnpm-debug.log*
+dist/
+build/
+.cache/
+.next/
+out/
+
+# --- Web assets ---
+*.map
+*.bundle.js
+*.bundle.css
+
+# --- Environment & secrets ---
+.env.local
+.env.development
+.env.production
+.env.test
+.env.*
+
+# ------- ARCHIVES ---------------
+*.rar
