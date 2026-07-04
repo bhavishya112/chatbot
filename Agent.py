@@ -27,11 +27,11 @@ def main() -> int:
         request = AgentRequest.from_dict(data)
         settings = Settings.from_env()
         logger.info(
-            "Starting agent request session_id=%s query_chars=%s gemini_key_configured=%s model=%s",
+            "Starting agent request session_id=%s query_chars=%s local_model_url=%s local_model_name=%s",
             request.session_id,
             len(request.query),
-            bool(settings.gemini_api_key),
-            settings.gemini_model,
+            settings.local_model_url,
+            settings.local_model_name,
         )
         agent = ProductionAgent(settings)
 

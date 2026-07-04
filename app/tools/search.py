@@ -8,7 +8,7 @@ from app.schemas import ToolObservation, ToolRequest
 
 class SearchTool:
     name = "search"
-    description = "Use Gemini Google Search/tooling for current web-backed answers when configured."
+    description = "Search is disabled for fully local model mode unless a separate local/web search adapter is added."
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -25,21 +25,8 @@ class SearchTool:
         if not query:
             return ToolObservation(False, "Search query is required.")
         if not self.settings.enable_google_search:
-            return ToolObservation(False, "Google Search is disabled by ENABLE_GOOGLE_SEARCH.")
-        if not self.settings.gemini_api_key:
-            return ToolObservation(False, "Google Search is unavailable because GEMINI_API_KEY is not configured.")
-
-        try:
-            from google import genai  # type: ignore
-            from google.genai import types  # type: ignore
-
-            client = genai.Client(api_key=self.settings.gemini_api_key)
-            response = client.models.generate_content(
-                model=self.settings.gemini_model,
-                contents=query,
-                config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
-            )
-            text = getattr(response, "text", "") or ""
-            return ToolObservation(True, text.strip() or "Search completed with no text result.")
-        except Exception as exc:
-            return ToolObservation(False, f"Google Search is unavailable: {exc.__class__.__name__}.")
+            return ToolObservation(False, "Search is disabled by ENABLE_GOOGLE_SEARCH.")
+        return ToolObservation(
+            False,
+            "Search is not configured in local-only mode. Add a SearxNG/Tavily/SerpAPI adapter if web search is needed.",
+        )

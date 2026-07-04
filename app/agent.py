@@ -8,7 +8,7 @@ from app.memory import JsonConversationMemory
 from app.prompts import build_prompt
 from app.retrieval import QdrantRetriever
 from app.schemas import AgentRequest
-from app.services.gemini import GeminiService
+from app.services.local_model import LocalModelService
 from app.tools import SearchTool, ToolRegistry, UIResolutionTool
 
 
@@ -22,7 +22,7 @@ class ProductionAgent:
         self.settings = settings
         self.memory = JsonConversationMemory(settings.memory_dir, settings.memory_window)
         self.retriever = QdrantRetriever(settings)
-        self.gemini = GeminiService(settings)
+        self.model = LocalModelService(settings)
         self.tools = ToolRegistry()
         self.tools.register(SearchTool(settings))
         self.tools.register(UIResolutionTool())
@@ -78,7 +78,7 @@ class ProductionAgent:
             retrieval="\n\n".join(part for part in [retrieval_text, search_text] if part),
             ui_context=ui_text,
         )
-        model_answer = self.gemini.generate(prompt)
+        model_answer = self.model.generate(prompt)
         if model_answer:
             return model_answer
         return self._fallback_answer(request, retrieval_text, search_text, ui_text)
@@ -101,8 +101,8 @@ class ProductionAgent:
         if context_parts:
             return "\n\n".join(context_parts)
         return (
-            "I can help with that, but the model service is not configured yet. "
-            "Set GEMINI_API_KEY to enable full agent responses."
+            "I can help with that, but the local model is not reachable yet. "
+            "Start Ollama and confirm LOCAL_MODEL_NAME is installed."
         )
 
     @staticmethod

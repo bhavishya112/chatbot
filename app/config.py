@@ -17,8 +17,9 @@ class Settings:
     project_root: Path
     data_dir: Path
     memory_dir: Path
-    gemini_api_key: str
-    gemini_model: str
+    local_model_url: str
+    local_model_name: str
+    local_model_timeout: int
     enable_google_search: bool
     enable_rag: bool
     qdrant_url: str
@@ -37,9 +38,10 @@ class Settings:
             project_root=root,
             data_dir=data_dir,
             memory_dir=memory_dir,
-            gemini_api_key=os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6LY64RSsueWDhAZymz66BFJngaGdpVBxmp4zg82Y5DKjA"),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            enable_google_search=_bool_env("ENABLE_GOOGLE_SEARCH", True),
+            local_model_url=os.getenv("LOCAL_MODEL_URL", "http://127.0.0.1:11434/api/generate"),
+            local_model_name=os.getenv("LOCAL_MODEL_NAME", "llama3.1:8b"),
+            local_model_timeout=max(5, int(os.getenv("LOCAL_MODEL_TIMEOUT", "120"))),
+            enable_google_search=_bool_env("ENABLE_GOOGLE_SEARCH", False),
             enable_rag=_bool_env("ENABLE_RAG", False),
             qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
