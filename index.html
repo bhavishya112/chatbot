@@ -543,6 +543,18 @@
                     body: JSON.stringify({ query: query })
                 });
 
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    try {
+                        const payload = JSON.parse(errorText);
+                        showError(payload.error || `Server error ${response.status}`);
+                    } catch {
+                        showError(`Server error ${response.status}`);
+                    }
+                    stopStreaming();
+                    return;
+                }
+
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
@@ -552,6 +564,9 @@
                     if (done) break;
 
                     buffer += decoder.decode(value, { stream: true });
+
+                    // Normalize newlines to LF for SSE parsing
+                    buffer = buffer.replace(/\r\n/g, '\n');
 
                     const events = buffer.split('\n\n');
                     buffer = events.pop();
@@ -586,25 +601,30 @@
                         if (eventName === 'message' && data) {
                             const chunk = JSON.parse(data);
 
-                            if (chunk.error) {
+                            if (chunk && chunk.error) {
                                 showError(chunk.error);
                                 stopStreaming();
                                 return;
                             }
 
-                            if (chunk.token) {
+                            const textToken = typeof chunk === 'string'
+                                ? chunk
+                                : chunk?.token || chunk?.content || '';
+
+                            if (textToken) {
                                 // Accumulate raw markdown text
-                                rawTextBuffer += chunk.token;
+                                rawTextBuffer += textToken;
                                 // Re-render entire buffer as markdown
                                 updateStreamingMarkdown(rawTextBuffer);
                             }
 
-                            if (chunk.done) {
+                            if (chunk && chunk.done) {
                                 stopStreaming();
                             }
                         }
                     }
                 }
+                stopStreaming();
 
             } catch (err) {
                 showError('Connection error: ' + err.message);

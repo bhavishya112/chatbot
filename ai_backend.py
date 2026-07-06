@@ -1,133 +1,111 @@
 #!/usr/bin/env python3
-"""
-AI Streaming Server - Sends tokens as they're generated
-Start: python3 ai_stream_server.py &
-"""
 
-import socket
 import json
-import signal
 import sys
-import warnings
-from transformers import pipeline, TextIteratorStreamer
-from threading import Thread
-from huggingface_hub import login 
+import logging
+import traceback
+from openai import OpenAI
 
-HOST = '127.0.0.1'
-PORT = 9999
+# Force stdout/stderr to use UTF-8 and LF line endings
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+sys.stderr.reconfigure(encoding="utf-8", newline="\n")
 
-pipe = None
+# Configure logging once at the top
+logging.basicConfig(
+    filename="python_logs.log",  # your log file
+    level=logging.ERROR,  # log only errors and above
+    format="%(asctime)s [python] %(levelname)s: %(message)s",
+)
 
-def load_model():
-    login("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")
-    global pipe
-    warnings.filterwarnings('ignore')
-    print("[SERVER] Loading model...", flush=True)
-    
-    pipe = pipeline(
-        "text-generation",
-        model="meta-llama/Llama-3.2-1B-Instruct",
-        torch_dtype="auto",
-        device_map="auto",
-        # device = "cuda"
 
+# Global exception handler
+def log_unhandled_exceptions(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Let Ctrl+C exit without logging
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+
+sys.excepthook = log_unhandled_exceptions
+
+client = OpenAI(
+    base_url="http://localhost:11434/v1",
+    api_key="ollama",
+)
+
+
+def Agent(model: str, query: str):
+    client.chat.completions.parse
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a helpful ecommerce assistant."},
+            {"role": "user", "content": query},
+        ],
+        temperature=0.7,
+        stream=True,
     )
-    print("[SERVER] Ready on port 9999", flush=True)
 
-def stream_response(query, conn):
-    """Generate and stream tokens immediately"""
-    try:
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": query}
-        ]
-        
-        # Use streamer for token-by-token output
-        streamer = TextIteratorStreamer(pipe.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        
-        # Generation args
-        generation_kwargs = dict(
-            text_inputs=messages,
-            max_new_tokens=256,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
-            streamer=streamer,
-        )
-        
-        # Run generation in background thread
-        thread = Thread(target=pipe, kwargs=generation_kwargs)
-        thread.start()
-        
-        # Stream each token as it's generated
-        generated_text = ""
-        for new_text in streamer:
-            generated_text += new_text
-            
-            # Send chunk immediately to PHP
-            chunk = json.dumps({
-                'token': new_text,
-                'done': False
-            }) + "\n"  # newline delimiter
-            
-            conn.sendall(chunk.encode('utf-8'))
-            conn.settimeout(0.1)  # small timeout to flush buffer
-        
-        # Send completion signal
-        done_msg = json.dumps({
-            'token': '',
-            'done': True,
-            'full_response': generated_text
-        }) + "\n"
-        conn.sendall(done_msg.encode('utf-8'))
-        
-        thread.join()
-        
-    except Exception as e:
-        error_msg = json.dumps({
-            'token': '',
-            'done': True,
-            'error': str(e)
-        }) + "\n"
-        conn.sendall(error_msg.encode('utf-8'))
+    for chunk in stream:
+
+        if not chunk.choices:
+            continue
+
+        delta = chunk.choices[0].delta.content
+
+        if delta:
+            print("event: message")
+            print("data: " + json.dumps({"token": delta}, ensure_ascii=False))
+            print()
+            sys.stdout.flush()
+
+    print("event: done")
+    print("data: {}")
+    print()
+    sys.stdout.flush()
+
 
 def main():
-    signal.signal(signal.SIGINT, lambda s,f: sys.exit(0))
-    load_model()
-    
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
-    server.listen(5)
-    
-    print("[SERVER] Waiting for connections...", flush=True)
-    
-    while True:
-        conn, addr = server.accept()
-        print(f"[SERVER] Connection from {addr}", flush=True)
-        
-        with conn:
-            # Read query
-            data = b''
-            while True:
-                chunk = conn.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
-                if b'\n' in chunk or len(chunk) < 4096:
-                    break
-            
-            try:
-                request = json.loads(data.decode('utf-8'))
-                query = request.get('query', '')
-                
-                if query:
-                    stream_response(query, conn)
-                    
-            except Exception as e:
-                print(f"[SERVER] Error: {e}", flush=True)
-        
-        print(f"[SERVER] Connection closed", flush=True)
+    try:
+
+        query = ""
+
+        if len(sys.argv) > 1:
+            query = " ".join(sys.argv[1:])
+
+        elif not sys.stdin.isatty():
+
+            raw = sys.stdin.read().strip()
+
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                    query = payload.get("query", "")
+                except json.JSONDecodeError:
+                    query = raw
+
+        else:
+            query = input("Ask something: ").strip()
+
+        if not query:
+            print("event: error")
+            print("data: " + json.dumps({"error": "Query required"}))
+            print()
+            sys.stdout.flush()
+            return
+
+        Agent("llama3.1:8b", query)
+
+    except Exception as e:
+
+        logging.exception(e)
+
+        print("event: error")
+        print("data: " + json.dumps({"error": str(e)}))
+        print()
+        sys.stdout.flush()
+
 
 if __name__ == "__main__":
     main()

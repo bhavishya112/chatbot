@@ -1,100 +1,94 @@
 <?php
-/**
- * SSE Streaming API - Forwards Python chunks to browser in real-time
- */
+set_time_limit(60);
+header("Content-Type: text/event-stream");
+header("Cache-Control: no-cache");
+header("Connection: keep-alive");
+header("X-Accel-Buffering: no");
 
-// CRITICAL: Disable all output buffering
-ob_implicit_flush(true);
-ob_end_flush();
-if (ob_get_level()) {
-    while (ob_get_level()) ob_end_flush();
+// Turn off output buffering
+while (ob_get_level() > 0) {
+    ob_end_clean();
 }
 
-header('Content-Type: text/event-stream');
-header('Cache-Control: no-cache');
-header('Connection: keep-alive');
-header('X-Accel-Buffering: no');  // Disable nginx buffering
+$logdir = __DIR__ . "/php_logs.log";
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    error_log("[ERROR] FrontEnd must use post only" . PHP_EOL, 3, $logdir);
+    http_response_code(405);
+    echo "data: " . json_encode(["error" => "POST only"]) . "\n\n";
+    flush();
+    exit;
+}
+error_log("[SUCCESS] Post Used by Client" . PHP_EOL, 3, $logdir);
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo "event: error\ndata: " . json_encode(['error' => 'POST only']) . "\n\n";
+$input = json_decode(file_get_contents("php://input"), true);
+
+if (empty($input["query"])) {
+    error_log("[ERROR] User Query Empty" . PHP_EOL, 3, $logdir);
+    http_response_code(400);
+    echo "data: " . json_encode(["error" => "Query required"]) . "\n\n";
+    flush();
     exit;
 }
 
-// Read POST body (SSE usually sends data via POST)
-$json = file_get_contents('php://input');
-$data = json_decode($json, true);
+error_log("[SUCCESS] User Query NOT Empty" . PHP_EOL, 3, $logdir);
 
-if (empty($data['query'])) {
-    echo "event: error\ndata: " . json_encode(['error' => 'Query required']) . "\n\n";
+
+$script = __DIR__ . "/ai_backend.py";
+
+$pythonPath = 'C:\Users\Public\AppData\anaconda3\envs\Agentik\python.exe';
+$command = escapeshellarg($pythonPath) . " -u " .
+    escapeshellarg($script) . " " .
+    escapeshellarg($input["query"]);
+
+$descriptors = [
+    0 => ["pipe", "r"],
+    1 => ["pipe", "w"],
+    2 => ["pipe", "w"],
+];
+
+$process = proc_open($command, $descriptors, $pipes);
+
+if (!is_resource($process)) {
+    error_log("[ERROR] Couldn't Start Python File" . PHP_EOL, 3, $logdir);
+    echo "data: " . json_encode(["error" => "Failed to start Python"]) . "\n\n";
+    flush();
     exit;
 }
 
-$host = '127.0.0.1';
-$port = 9999;
-$timeout = 120;
+fclose($pipes[0]);
 
-$socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-if (!$socket) {
-    echo "event: error\ndata: " . json_encode(['error' => 'Socket failed']) . "\n\n";
-    exit;
-}
+stream_set_blocking($pipes[1], false);
+stream_set_blocking($pipes[2], false);
 
-socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $timeout, 'usec' => 0]);
-socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, ['sec' => 5, 'usec' => 0]);
-
-// Disable Nagle algorithm for low latency
-socket_set_option($socket, SOL_TCP, TCP_NODELAY, 1);
-
-if (!socket_connect($socket, $host, $port)) {
-    echo "event: error\ndata: " . json_encode(['error' => 'Cannot connect to AI server']) . "\n\n";
-    socket_close($socket);
-    exit;
-}
-
-// Send query to Python
-$payload = json_encode(['query' => $data['query']]) . "\n";
-socket_write($socket, $payload, strlen($payload));
-
-// Stream Python's chunks directly to browser
-$buffer = '';
 while (true) {
-    $chunk = socket_read($socket, 4096);
-    if ($chunk === false || $chunk === '') {
+
+    // Forward anything Python prints
+    while (($line = fgets($pipes[1])) !== false) {
+        echo $line;
+        @ob_flush();
+        flush();
+    }
+
+    // Log stderr if desired
+    while (($err = fgets($pipes[2])) !== false) {
+        error_log("[PYTHON ERROR]" . trim($err) . PHP_EOL, 3, $logdir);
+    }
+
+    $status = proc_get_status($process);
+
+    if (!$status["running"]) {
         break;
     }
-    
-    $buffer .= $chunk;
-    
-    // Process complete lines (newline-delimited JSON)
-    while (($pos = strpos($buffer, "\n")) !== false) {
-        $line = substr($buffer, 0, $pos);
-        $buffer = substr($buffer, $pos + 1);
-        
-        if (empty($line)) continue;
-        
-        $token_data = json_decode($line, true);
-        if (!$token_data) continue;
-        
-        // Send SSE event
-        echo "event: message\n";
-        echo "data: " . json_encode($token_data) . "\n\n";
-        
-        // Flush to browser immediately
-        if (ob_get_level()) {
-            ob_flush();
-        }
-        flush();
-        
-        // Check if done
-        if (!empty($token_data['done'])) {
-            break 2;
-        }
-    }
+
+    usleep(10000); // 10 ms
 }
 
-socket_close($socket);
+fclose($pipes[1]);
+fclose($pipes[2]);
 
-// Send final done event
-echo "event: done\ndata: " . json_encode(['finished' => true]) . "\n\n";
+proc_close($process);
+
+// echo "data: [DONE]\n\n";
 flush();
-?>
+
+error_log("[SUCCESS] TRANSACTION COMPLETE" . PHP_EOL, 3, $logdir);
