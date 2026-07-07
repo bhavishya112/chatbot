@@ -1,5 +1,5 @@
 <?php
-set_time_limit(60);
+set_time_limit(180);
 header("Content-Type: text/event-stream");
 header("Cache-Control: no-cache");
 header("Connection: keep-alive");
