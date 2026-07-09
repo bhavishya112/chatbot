@@ -1,42 +1,36 @@
 #!/usr/bin/env python3
-
 import json
 import sys
 import logging
 import traceback
-from openai import OpenAI
 
 # Force stdout/stderr to use UTF-8 and LF line endings
 sys.stdout.reconfigure(encoding="utf-8", newline="\n")
 sys.stderr.reconfigure(encoding="utf-8", newline="\n")
 
-# Configure logging once at the top
+# Configure logging
+logger = logging.getLogger(__name__)
+
 logging.basicConfig(
-    filename="python_logs.log",  # your log file
-    level=logging.ERROR,  # log only errors and above
-    format="%(asctime)s [python] %(levelname)s: %(message)s",
+    filename="ai_backend.log",
+    filemode="a",  # 'a' appends new logs; 'w' overwrites the file each run
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%H:%M %d %B",
+    encoding="utf-8",
 )
 
-
-# Global exception handler
-def log_unhandled_exceptions(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        # Let Ctrl+C exit without logging
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
-
-
-sys.excepthook = log_unhandled_exceptions
+# 3. Log a standard informational message
+logger.info("The application started successfully.")
 
 # ============================================================================================
-#                                       TOOLS
+#                                       TOOL DEFINITIONS
 # ============================================================================================
 TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "google_search",
+            "name": "web_search",
             "description": "Searches the internet for information using Google-like queries.",
             "parameters": {
                 "type": "object",
@@ -50,178 +44,231 @@ TOOLS = [
                         "description": "Number of search results to return (default 10).",
                     },
                 },
-                "required": ["query"],
+                "required": ["query", "num_results"],
                 "additionalProperties": False,
             },
+            "strict": True,
         },
     }
 ]
 
-# ============================================================================================
+# ================================================================================================
 #                                   TOOL EXECUTOR
-# ============================================================================================
-# ------------------------------------------------------------------
+# ==============================================================================================
+# ----------------------------------------------------------------------------------------------
 # Register all available tools here
-# ------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------
 
 from typing import Callable
-from tools import google_search
+from tools import web_search
 
 AVAILABLE_TOOLS: dict[str, Callable] = {
-    "google_search": google_search,
+    "web_search": web_search,
 }
 
 
 # ------------------------------------------------------------------
 # Executes tool calls returned by the LLM
 # ------------------------------------------------------------------
-def run_tool(tool_calls: dict) -> str:
+def run_tool(tool_name, **args) -> str:
     """
-    Executes one or more tool calls.
-
-    Args:
-        tool_calls:
-        {
-            0: {
-                "id": "...",
-                "name": "google_search",
-                "arguments": "{\"query\":\"python\",\"num_results\":\"5\"}"
-            }
-        }
+    Executes tool calls
 
     Returns:
-        String suitable for appending directly to the LLM scratchpad.
+        String representation of Observation
     """
+    result = ""
+    # Find tool
+    tool = AVAILABLE_TOOLS.get(tool_name)
 
-    scratchpad = ""
+    # Execute tool
+    try:
+        obs = tool(**args)
+    except Exception as e:
+        result = f"Tool execution failed: {e}"
 
-    for _, tool_call in tool_calls.items():
+    result += f"Tool: {tool_name}\n" f"Arguments: {args}\n" f"Observation:\n{obs}\n"
 
-        tool_id = tool_call.get("id", "")
-        tool_name = tool_call.get("name", "")
-        arguments = tool_call.get("arguments", "{}")
-
-        # Parse JSON arguments
-        try:
-            args = json.loads(arguments)
-        except json.JSONDecodeError:
-            scratchpad += (
-                f"\nTool Call ID: {tool_id}\n"
-                f"Tool: {tool_name}\n"
-                f"Observation: Invalid JSON arguments.\n"
-            )
-            continue
-
-        # Find tool
-        tool = AVAILABLE_TOOLS.get(tool_name)
-
-        if tool is None:
-            scratchpad += (
-                f"\nTool Call ID: {tool_id}\n"
-                f"Tool: {tool_name}\n"
-                f"Observation: Unknown tool.\n"
-            )
-            continue
-
-        # Execute tool
-        try:
-            result = tool(**args)
-        except Exception as e:
-            result = f"Tool execution failed: {e}"
-
-        scratchpad += (
-            f"\nTool Call ID: {tool_id}\n"
-            f"Tool: {tool_name}\n"
-            f"Arguments: {json.dumps(args, ensure_ascii=False)}\n"
-            f"Observation:\n{result}\n"
-        )
-
-    return scratchpad
+    return result
 
 
 # ============================================================================================
+from typing import Optional, Literal
+from pydantic import BaseModel
+
+
+class Thought(BaseModel):
+    goal: str
+    reasoning: str
+    confidence: float
+
+
+class NextAction(BaseModel):
+    type: Literal["tool", "respond", "finish"]
+    tool_name: Optional[str] = None
+    tool_call_id: str = None
+    arguments: Optional[dict] = None
+
+
+class Observation(BaseModel):
+    tool_call_id: str = None
+    tool_name: str = None
+    success: Optional[bool] = None
+    summary: Optional[str] = None
+    confidence: Optional[float] = None
+    data: Optional[dict] = None
+
+
+class AgentState(BaseModel):
+    stage: Literal["THINK", "OBSERVE", "FINAL"]
+    thought: Thought
+    next_action: NextAction
+    observation: Observation
+    final_answer: Optional[str] = None
+
+
+from openai import OpenAI
+
+# client = OpenAI(
+#     base_url="http://localhost:11434/v1",
+#     api_key="",
+# )
 client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama",
+    base_url="https://api.groq.com/openai/v1",
+    api_key="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",
 )
 
 MAX_ITERATIONS = 5
+MODEL = "openai/gpt-oss-20b"
+# MODEL = "llama3.1:8b"
+
+
+import json
+import pprint
+import sys
+
+
+def emit(event: str, data):
+    print(f"event: {event}")
+    print("data:", json.dumps(data, ensure_ascii=False))
+    print()
+    sys.stdout.flush()
 
 
 def Agent(model: str, query: str):
-    scratch_pad = ""
-    system_prompt = f"""You are a helpful educational institute assistant.
-    internally (do not express it) you work in 2 stage ReAct (Reasoning + Acting + Observing) cycles
-    where you iterate N times (current limit is : {MAX_ITERATIONS})
-    here is how it works : 
-    if its something you can answer straight on, you can straight on answer back from stage one, else you proceed further
-    stage 1 : Reason + Act -> Here you decide whether you're able to answer, or you need more details or more iterations to proceed
-    stage 2 : Observe -> Here you output the results in STUDENT FRIENDLY way
-    Generate content to the end user only when you're ready or need more details
-    you have access to your personal scratch pad do not share these details with the end user 
-    scratch pad : {scratch_pad} """
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": query},
-    ]
+    system_prompt = """You are a helpful ReAct (Reasoning + Acting) Agent.
+
+Stage 1:
+Decide whether you can answer directly or require tool calls.
+
+Stage 2:
+Observe tool results.
+If sufficient, answer.
+Otherwise continue reasoning and call more tools.
+
+Terminate ONLY by giving a final answer with no tool calls.
+"""
+
+    sys_message = [{"role": "system", "content": system_prompt}]
+    messages = [{"role": "user", "content": query}]
+
+    round = 0
 
     for _ in range(MAX_ITERATIONS):
 
+        round += 1
+
+        logger.info(
+            "[🐦‍🔥 CONTEXT %d]\n%s",
+            round,
+            pprint.pformat(messages, width=150),
+        )
+
         stream = client.chat.completions.create(
-            model="llama3.1:8b",
-            messages=messages,
-            temperature=0.7,
-            stream=True,
+            model=model,
+            messages=sys_message + messages,
             tools=TOOLS,
+            temperature=0.2,
+            top_p=0.7,
+            max_tokens=1024,
+            reasoning_effort="low",
+            stream=True,
         )
 
         assistant_content = ""
+        assistant_reasoning = ""
+
         tool_calls = {}
 
-        # Read the ENTIRE stream
+        finish_reason = None
+
         for chunk in stream:
 
             if not chunk.choices:
                 continue
 
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            delta = choice.delta
 
-            # Collect text
+            finish_reason = choice.finish_reason
+
+            # ----------------------------
+            # reasoning
+            # ----------------------------
+
+            reasoning = getattr(delta, "reasoning", None)
+
+            if reasoning:
+                assistant_reasoning += reasoning
+                emit("thinking", {"token": reasoning})
+
+            # ----------------------------
+            # assistant content
+            # ----------------------------
+
             if delta.content:
                 assistant_content += delta.content
+                emit("message", {"token": delta.content})
 
-                print("event: message")
-                print("data:", json.dumps({"token": delta.content}, ensure_ascii=False))
-                print()
-                sys.stdout.flush()
+            # ----------------------------
+            # tool calls
+            # ----------------------------
 
-            # Collect tool calls
             if delta.tool_calls:
+
                 for tc in delta.tool_calls:
 
                     idx = tc.index
 
                     if idx not in tool_calls:
-                        tool_calls[idx] = {"id": "", "name": "", "arguments": ""}
+                        tool_calls[idx] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                        }
 
                     if tc.id:
                         tool_calls[idx]["id"] = tc.id
 
-                    if tc.function.name:
-                        tool_calls[idx]["name"] = tc.function.name
+                    if tc.function:
 
-                    if tc.function.arguments:
-                        tool_calls[idx]["arguments"] += tc.function.arguments
+                        if tc.function.name:
+                            tool_calls[idx]["name"] = tc.function.name
 
-        # Finished reading this response
+                        if tc.function.arguments:
+                            tool_calls[idx]["arguments"] += tc.function.arguments
+
+        # ============================================================
+        # Tool execution
+        # ============================================================
 
         if tool_calls:
 
-            # Save assistant tool request
             messages.append(
                 {
                     "role": "assistant",
+                    "content": assistant_content,
                     "tool_calls": [
                         {
                             "id": tc["id"],
@@ -236,28 +283,48 @@ def Agent(model: str, query: str):
                 }
             )
 
-            # Execute tools
             for tc in tool_calls.values():
 
-                result = run_tool({0: tc})
+                emit(
+                    "tool_call",
+                    {
+                        "name": tc["name"],
+                        "arguments": json.loads(tc["arguments"]),
+                    },
+                )
+
+                args = json.loads(tc["arguments"])
+
+                result = run_tool(tc["name"], **args)
+
+                logger.info("[TOOL] %s", tc["name"])
+                logger.info("[RESULT] %s", result)
+
+                emit(
+                    "tool_result",
+                    {
+                        "name": tc["name"],
+                        "result": result,
+                    },
+                )
 
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tc["id"],
-                        "content": result,
+                        "content": json.dumps(result),
                     }
                 )
 
             continue
 
+        # ============================================================
         # Final answer
+        # ============================================================
+
         break
 
-    print("event: done")
-    print("data: {}")
-    print()
-    sys.stdout.flush()
+    emit("done", {})
 
 
 def main():
@@ -289,11 +356,11 @@ def main():
             sys.stdout.flush()
             return
 
-        Agent("llama3.1:8b", query)
+        Agent(MODEL, query)
+        logger.info("Application Ended Successfully\n\n")
 
     except Exception as e:
-
-        logging.exception(e)
+        logger.exception(e)
 
         print("event: error")
         print("data: " + json.dumps({"error": str(e)}))
