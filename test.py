@@ -86,10 +86,11 @@
 #     print("emb ---- ",emb.embedding)
 # Step 1: Find all items with page="schedule"
 
-# import chromadb 
+import chromadb 
 
-# client = chromadb.PersistentClient(path="data/vectordb/ui_vector_db2")
-# collection = client.get_or_create_collection("ui_elements")
+client = chromadb.PersistentClient(path="data/vectordb/ui_vector_db2")
+collection = client.list_collections()
+print(collection)
 
 # collection.delete(where={"page": "detailed_pschedule"})
 
@@ -122,7 +123,7 @@
 # for score, doc in ranked:
 #     print(score, doc)
 
-from tools import query_ui
+# from tools import query_ui
 
 
-print(query_ui("dashboard",20,'desktop','ui_elements'))
+# print(query_ui("dashboard",20,'desktop','ui_elements'))
