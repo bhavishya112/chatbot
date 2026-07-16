@@ -12,10 +12,10 @@ sys.stderr.reconfigure(encoding="utf-8", newline="\n")
 logger = logging.getLogger(__name__)
 
 logging.basicConfig(
-    filename="ai_backend.log",
-    filemode="a",  # 'a' appends new logs; 'w' overwrites the file each run
+    filename="logs/ai_backend.log",
+    filemode="a",  # 'a' appends new logs; 'w' overwrites each run
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(levelname)s - %(filename)s - %(message)s",
     datefmt="%H:%M %d %B",
     encoding="utf-8",
 )
@@ -24,14 +24,14 @@ logging.basicConfig(
 logger.info("The application started successfully.")
 
 # ============================================================================================
-#                                       TOOL DEFINITIONS
+#                                       TOOL DEFINITIONS | TOOL REGISTRY | TOOLS
 # ============================================================================================
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Searches the internet for information using Google-like queries.",
+            "description": "Searches the internet for information using Google-like queries. Use only when user wants up-to-date information, not otherwise. Always Preserve URL references with text",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -49,7 +49,42 @@ TOOLS = [
             },
             "strict": True,
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_ui",
+            "description": """Gets UI context. Helps with our website navigation. First Ask which device user is on.  Do not add anything by yourself.
+            your answer must necessarily be like : 'Go to middle of the page a wide grid of blue boxes would appear' or 'go to profile > settings > notification'
+            Remember DO NOT reveal dynamic text like student name or applications ids """,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The UI question e.g. 'leave applications' or 'my content'.",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "How many top matches to get (default 5)",
+                    },
+                    "view": {
+                        "type": "string",
+                        "enum": ["mobile", "desktop"],
+                        "description": "Which device is user using (default desktop)",
+                    },
+                    "collection": {
+                        "type": "string",
+                        "enum": ["ui_elements"],
+                        "description": "vectordb collection to use for retrieval",
+                    },
+                },
+                "required": ["question", "top_k", "view", "collection"],
+                "additionalProperties": False,
+            },
+            "strict": True,
+        },
+    },
 ]
 
 # ================================================================================================
@@ -60,15 +95,13 @@ TOOLS = [
 # -------------------------------------------------------------------------------------------------
 
 from typing import Callable
-from tools import web_search
+from tools import web_search, query_ui
 
-AVAILABLE_TOOLS: dict[str, Callable] = {
-    "web_search": web_search,
-}
+AVAILABLE_TOOLS: dict[str, Callable] = {"web_search": web_search, "query_ui": query_ui}
 
 
 # ------------------------------------------------------------------
-# Executes tool calls returned by the LLM
+# Executes tool calls returned by the LLM (Not to be modified with new tool)
 # ------------------------------------------------------------------
 def run_tool(tool_name, **args) -> str:
     """
@@ -92,41 +125,12 @@ def run_tool(tool_name, **args) -> str:
     return result
 
 
-# ============================================================================================
-from typing import Optional, Literal
-from pydantic import BaseModel
+# ------------------------------------------------------------------------
 
-
-class Thought(BaseModel):
-    goal: str
-    reasoning: str
-    confidence: float
-
-
-class NextAction(BaseModel):
-    type: Literal["tool", "respond", "finish"]
-    tool_name: Optional[str] = None
-    tool_call_id: str = None
-    arguments: Optional[dict] = None
-
-
-class Observation(BaseModel):
-    tool_call_id: str = None
-    tool_name: str = None
-    success: Optional[bool] = None
-    summary: Optional[str] = None
-    confidence: Optional[float] = None
-    data: Optional[dict] = None
-
-
-class AgentState(BaseModel):
-    stage: Literal["THINK", "OBSERVE", "FINAL"]
-    thought: Thought
-    next_action: NextAction
-    observation: Observation
-    final_answer: Optional[str] = None
-
-
+# -------------------------------------------------------------------------
+# ======================================================================================================================
+# ----------------------------------------AGENT--------------------------------------------------------------------------------
+# ======================================================================================================================
 from openai import OpenAI
 
 # client = OpenAI(
@@ -157,8 +161,15 @@ def emit(event: str, data):
 
 def Agent(model: str, query: str):
 
-    system_prompt = """You are a helpful ReAct (Reasoning + Acting) Agent.
+    system_prompt = """
+You are helpful chatbot for our ASD Academy
+UI information may ONLY come from tool outputs.
+IMPORTANT : For ui related queries, provide full information such as size,position,color, flow like myprofile>billing>details
 
+Never answer UI-related questions from your internal knowledge or reasoning. If no tool has returned the requested information, reply that it could not be found instead of guessing.
+You are ReAct (Reasoning + Acting) Agent and can help with user navigation and up-to-date information 
+
+Working:
 Stage 1:
 Decide whether you can answer directly or require tool calls.
 
@@ -166,6 +177,10 @@ Stage 2:
 Observe tool results.
 If sufficient, answer.
 Otherwise continue reasoning and call more tools.
+
+Personality:
+Very User Friendly : give your best to help, Factually correct : You do not deviate from provided information
+
 
 Terminate ONLY by giving a final answer with no tool calls.
 """
@@ -190,9 +205,9 @@ Terminate ONLY by giving a final answer with no tool calls.
             messages=sys_message + messages,
             tools=TOOLS,
             temperature=0.2,
-            top_p=0.7,
+            top_p=0.4,
             max_tokens=1024,
-            reasoning_effort="low",
+            reasoning_effort="medium",
             stream=True,
         )
 

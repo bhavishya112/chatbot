@@ -597,8 +597,6 @@ data
 # Archives
 *.rar
 
-#personal files
-test.py
 
 # End of https://www.toptal.com/developers/gitignore/api/python,windows,archive,vs
 

@@ -10,7 +10,7 @@ while (ob_get_level() > 0) {
     ob_end_clean();
 }
 
-$logdir = __DIR__ . "/php_logs.log";
+$logdir = __DIR__ . "logs/php_logs.log";
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     error_log("[ERROR] FrontEnd must use post only" . PHP_EOL, 3, $logdir);
     http_response_code(405);
