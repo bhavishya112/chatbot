@@ -1,6 +1,8 @@
 # AGENTIC CHATBOT
 developer - BHAVISHYA SHARMA
 
+[Video Demonstration of Project](working_demo.mp4)
+
 ## Overview
 This is a simple chatbot which has two tools : 1) web_search() and 2) query_ui():<br>
 - web_search : searches web and gets the results in structured string format<br>
@@ -30,13 +32,13 @@ VectorDB : Chromadb
 ## Usage
 To use the project, you'll have to do some preprocessing (if you want to use the query_ui feature otherwise skip these Phase1 and Phase2) : <br>
 ## 1.
-### <p align="center">  Phase 1</p>
+### Phase 1
 1. Find **scraper.py** in root dir, find this line `if __name__ == "__main__":`, just under it see `target_url = "something"`
 2. In place of "something", give the url of your website
 3. Run the Script as `python scraper.py`
 4. It would make data/website_snapshots/your_webpage.json
 
-### <p align="center">  Phase 2</p>
+### Phase 2
 1. Find **flattenNindex.py**
 2. Run it like :  `flattenNindex.py [-h] [--page PAGE] [--desc DESC] [--db DB] [--query QUERY] snapshot_file`<br>
   --page is the string html pagename that is shown to user <br>
